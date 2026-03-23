@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Geofence } from "@/lib/api";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,10 +13,45 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { MapContainer, TileLayer, Circle, Polygon } from "react-leaflet";
-import { Plus, Trash2, Edit2 } from "lucide-react";
+import { MapContainer, TileLayer, Circle, Polygon, useMap } from "react-leaflet";
+import { Plus, Trash2, Edit2, MapPin } from "lucide-react";
 import { toast } from "sonner";
+import { useEffect } from "react";
 import "leaflet/dist/leaflet.css";
+
+function MapController({ selectedGeofence }: { selectedGeofence: Geofence | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (selectedGeofence) {
+      if (selectedGeofence.fence_type === "circle" && selectedGeofence.center_lat && selectedGeofence.center_lon) {
+        map.flyTo([selectedGeofence.center_lat, selectedGeofence.center_lon], 14, {
+          animate: true,
+          duration: 1.5,
+        });
+      } else if (selectedGeofence.fence_type === "polygon" && selectedGeofence.geometry) {
+        const positions = selectedGeofence.geometry.map((c) => [c[1], c[0]] as [number, number]);
+        const bounds = positions.reduce(
+          (acc, pos) => {
+            acc.minLat = Math.min(acc.minLat, pos[0]);
+            acc.maxLat = Math.max(acc.maxLat, pos[0]);
+            acc.minLon = Math.min(acc.minLon, pos[1]);
+            acc.maxLon = Math.max(acc.maxLon, pos[1]);
+            return acc;
+          },
+          { minLat: Infinity, maxLat: -Infinity, minLon: Infinity, maxLon: -Infinity }
+        );
+        const center: [number, number] = [
+          (bounds.minLat + bounds.maxLat) / 2,
+          (bounds.minLon + bounds.maxLon) / 2,
+        ];
+        map.flyTo(center, 13, { animate: true, duration: 1.5 });
+      }
+    }
+  }, [selectedGeofence, map]);
+
+  return null;
+}
 
 export default function Geofences() {
   const queryClient = useQueryClient();
@@ -26,6 +61,7 @@ export default function Geofences() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedGeofenceId, setSelectedGeofenceId] = useState<number | null>(null);
   const [createForm, setCreateForm] = useState({
     name: "",
     description: "",
@@ -34,6 +70,29 @@ export default function Geofences() {
     center_lon: "",
     radius_meters: "500",
   });
+
+  const selectedGeofence = useMemo(
+    () => geofences.find((g) => g.id === selectedGeofenceId) || null,
+    [geofences, selectedGeofenceId]
+  );
+
+  // Calculate map center based on geofences
+  const mapCenter: [number, number] = useMemo(() => {
+    if (geofences.length === 0) return [20.5937, 78.9629];
+    
+    const validGeofences = geofences.filter(
+      (g) => g.center_lat != null && g.center_lon != null
+    );
+    
+    if (validGeofences.length === 0) return [20.5937, 78.9629];
+    
+    const avgLat = validGeofences.reduce((sum, g) => sum + g.center_lat!, 0) / validGeofences.length;
+    const avgLon = validGeofences.reduce((sum, g) => sum + g.center_lon!, 0) / validGeofences.length;
+    
+    return [avgLat, avgLon];
+  }, [geofences]);
+
+  const mapZoom = geofences.length > 0 ? 10 : 5;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -92,13 +151,20 @@ export default function Geofences() {
             <CardTitle className="text-base">Geofence Map</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="h-[400px] rounded-b-lg overflow-hidden">
-              <MapContainer center={[20.5937, 78.9629]} zoom={5} className="h-full w-full">
+            <div className="h-[400px] rounded-b-lg overflow-hidden relative z-0">
+              <MapContainer 
+                center={mapCenter} 
+                zoom={mapZoom} 
+                className="h-full w-full"
+                key={`${mapCenter[0]}-${mapCenter[1]}`}
+              >
+                <MapController selectedGeofence={selectedGeofence} />
                 <TileLayer
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 {geofences.map((g) => {
+                  const isSelected = g.id === selectedGeofenceId;
                   if (g.fence_type === "circle" && g.center_lat && g.center_lon && g.radius_meters) {
                     return (
                       <Circle
@@ -106,8 +172,13 @@ export default function Geofences() {
                         center={[g.center_lat, g.center_lon]}
                         radius={g.radius_meters}
                         pathOptions={{
-                          color: g.is_active ? "hsl(174, 62%, 38%)" : "#9ca3af",
-                          fillOpacity: 0.15,
+                          color: isSelected 
+                            ? "#3b82f6" 
+                            : g.is_active 
+                            ? "hsl(174, 62%, 38%)" 
+                            : "#9ca3af",
+                          fillOpacity: isSelected ? 0.3 : 0.15,
+                          weight: isSelected ? 3 : 2,
                         }}
                       />
                     );
@@ -119,8 +190,13 @@ export default function Geofences() {
                         key={g.id}
                         positions={positions}
                         pathOptions={{
-                          color: g.is_active ? "hsl(174, 62%, 38%)" : "#9ca3af",
-                          fillOpacity: 0.15,
+                          color: isSelected 
+                            ? "#3b82f6" 
+                            : g.is_active 
+                            ? "hsl(174, 62%, 38%)" 
+                            : "#9ca3af",
+                          fillOpacity: isSelected ? 0.3 : 0.15,
+                          weight: isSelected ? 3 : 2,
                         }}
                       />
                     );
@@ -154,9 +230,19 @@ export default function Geofences() {
                   <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">No geofences</TableCell></TableRow>
                 ) : (
                   geofences.map((g) => (
-                    <TableRow key={g.id}>
+                    <TableRow 
+                      key={g.id}
+                      className={selectedGeofenceId === g.id ? "bg-muted" : ""}
+                    >
                       <TableCell>
-                        <button className="font-medium hover:underline" onClick={() => setEventsId(g.id)}>
+                        <button 
+                          className="font-medium hover:underline flex items-center gap-2" 
+                          onClick={() => {
+                            setSelectedGeofenceId(g.id);
+                            setEventsId(g.id);
+                          }}
+                        >
+                          <MapPin className="h-3 w-3" />
                           {g.name}
                         </button>
                       </TableCell>
@@ -224,38 +310,73 @@ export default function Geofences() {
 
       {/* Create dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent>
+        <DialogContent className="max-w-md z-[10000]">
           <DialogHeader>
             <DialogTitle>Create Geofence</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Name</Label>
-              <Input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} />
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input 
+                id="name"
+                placeholder="Enter geofence name"
+                value={createForm.name} 
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} 
+              />
             </div>
-            <div>
-              <Label>Description</Label>
-              <Input value={createForm.description} onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} />
+            <div className="space-y-2">
+              <Label htmlFor="description">Description</Label>
+              <Input 
+                id="description"
+                placeholder="Enter description"
+                value={createForm.description} 
+                onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} 
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Center Latitude</Label>
-                <Input type="number" step="any" value={createForm.center_lat} onChange={(e) => setCreateForm({ ...createForm, center_lat: e.target.value })} />
+              <div className="space-y-2">
+                <Label htmlFor="lat">Center Latitude</Label>
+                <Input 
+                  id="lat"
+                  type="number" 
+                  step="any"
+                  placeholder="e.g. 20.5937"
+                  value={createForm.center_lat} 
+                  onChange={(e) => setCreateForm({ ...createForm, center_lat: e.target.value })} 
+                />
               </div>
-              <div>
-                <Label>Center Longitude</Label>
-                <Input type="number" step="any" value={createForm.center_lon} onChange={(e) => setCreateForm({ ...createForm, center_lon: e.target.value })} />
+              <div className="space-y-2">
+                <Label htmlFor="lon">Center Longitude</Label>
+                <Input 
+                  id="lon"
+                  type="number" 
+                  step="any"
+                  placeholder="e.g. 78.9629"
+                  value={createForm.center_lon} 
+                  onChange={(e) => setCreateForm({ ...createForm, center_lon: e.target.value })} 
+                />
               </div>
             </div>
-            <div>
-              <Label>Radius (meters)</Label>
-              <Input type="number" value={createForm.radius_meters} onChange={(e) => setCreateForm({ ...createForm, radius_meters: e.target.value })} />
+            <div className="space-y-2">
+              <Label htmlFor="radius">Radius (meters)</Label>
+              <Input 
+                id="radius"
+                type="number"
+                placeholder="500"
+                value={createForm.radius_meters} 
+                onChange={(e) => setCreateForm({ ...createForm, radius_meters: e.target.value })} 
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending}>
-              Create
+            <Button variant="secondary" onClick={() => setShowCreate(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={() => createMutation.mutate()} 
+              disabled={createMutation.isPending || !createForm.name || !createForm.center_lat || !createForm.center_lon}
+            >
+              {createMutation.isPending ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

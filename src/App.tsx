@@ -11,6 +11,7 @@ import VehicleDetail from "./pages/VehicleDetail";
 import FuelMonitoring from "./pages/FuelMonitoring";
 import Geofences from "./pages/Geofences";
 import Analytics from "./pages/Analytics";
+import RouteHistory from "./pages/RouteHistory";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +31,7 @@ const App = () => (
             <Route path="/fuel" element={<FuelMonitoring />} />
             <Route path="/geofences" element={<Geofences />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/route-history" element={<RouteHistory />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

@@ -82,26 +82,39 @@ export function AppLayout() {
         <div className="min-h-screen flex w-full">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="h-14 flex items-center justify-between border-b bg-card px-4">
-              <div className="flex items-center gap-2">
-                <SidebarTrigger />
-                <span className="text-sm font-semibold text-foreground">GPS Fleet Manager</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                {connected ? (
-                  <span className="flex items-center gap-1.5 text-emerald-600">
-                    <Wifi className="h-4 w-4" />
-                    <span className="hidden sm:inline">Live</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-destructive">
-                    <WifiOff className="h-4 w-4" />
-                    <span className="hidden sm:inline">Offline</span>
-                  </span>
-                )}
+            {/* Top Header Bar */}
+            <header className="bg-gradient-to-r from-slate-800 via-slate-900 to-slate-950 text-white border-b border-slate-700/50 shadow-lg">
+              <div className="px-6 py-4 relative">
+                <div className="text-center">
+                  <h1 className="text-xl font-bold tracking-tight">AAROV BUILDMART PRIVATE LIMITED</h1>
+                  <p className="text-sm text-slate-300 mt-0.5">Fleet Management - A Product of On-tym Solutions</p>
+                </div>
+                <div className="absolute right-6 top-1/2 -translate-y-1/2">
+                  {connected ? (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                      <Wifi className="h-4 w-4 text-emerald-400" />
+                      <span className="hidden sm:inline text-sm text-emerald-300 font-medium">Live</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/30">
+                      <WifiOff className="h-4 w-4 text-red-400" />
+                      <span className="hidden sm:inline text-sm text-red-300 font-medium">Offline</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </header>
-            <main className="flex-1 overflow-auto">
+
+            {/* Secondary Navigation Bar */}
+            <div className="h-12 flex items-center border-b bg-white px-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <SidebarTrigger className="text-slate-600 hover:text-slate-900" />
+                <span className="text-sm font-semibold text-slate-700">GPS Fleet Manager</span>
+              </div>
+            </div>
+           
+
+            <main className="flex-1 overflow-auto bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200">
               <Outlet />
             </main>
           </div>

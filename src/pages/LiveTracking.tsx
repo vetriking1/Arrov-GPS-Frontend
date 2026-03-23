@@ -1,10 +1,61 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useWSData } from "@/components/AppLayout";
-import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Search, Truck } from "lucide-react";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+
+// Create custom car icons with colored circle background
+const createCarIcon = (color: string) => {
+  return L.divIcon({
+    html: `
+      <div style="
+        width: 40px;
+        height: 40px;
+        background-color: ${color};
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 3px solid white;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      ">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+        </svg>
+      </div>
+    `,
+    className: 'custom-car-icon',
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -20],
+  });
+};
+
+function MapController({ center, zoom, selectedId }: { center: [number, number]; zoom: number; selectedId: number | null }) {
+  const map = useMap();
+  const prevSelectedId = useRef(selectedId);
+
+  useEffect(() => {
+    // If vehicle selection changed, fly to it with zoom
+    if (selectedId !== prevSelectedId.current && selectedId !== null) {
+      map.flyTo(center, zoom, { animate: true, duration: 1.5 });
+      prevSelectedId.current = selectedId;
+    } else if (selectedId === null && prevSelectedId.current !== null) {
+      // Deselected, zoom out smoothly
+      map.flyTo(center, zoom, { animate: true, duration: 1.5 });
+      prevSelectedId.current = null;
+    } else if (selectedId !== null) {
+      // Same vehicle selected, just pan to follow movement
+      map.panTo(center, { animate: true, duration: 1 });
+    }
+  }, [center, zoom, selectedId, map]);
+
+  return null;
+}
 
 export default function LiveTracking() {
   const { vehicleLocations, vehicleStatuses, fuelUpdates } = useWSData();
@@ -38,6 +89,12 @@ export default function LiveTracking() {
     return [20.5937, 78.9629];
   }, [locations, selectedId, vehicleLocations]);
 
+  const zoom = useMemo(() => {
+    if (selectedId) return 17;
+    if (locations.length > 0) return 14;
+    return 5;
+  }, [locations.length, selectedId]);
+
   const getColor = (loc: (typeof locations)[0]) => {
     if (loc.speed > 0) return "#10b981";
     const status = vehicleStatuses[loc.vehicleId]?.status;
@@ -51,9 +108,9 @@ export default function LiveTracking() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
+    <div className="flex h-[calc(100vh-3.5rem)] relative">
       {/* Vehicle list panel */}
-      <div className="w-80 border-r bg-card flex flex-col flex-shrink-0">
+      <div className="w-80 border-r bg-card flex flex-col flex-shrink-0 relative z-10">
         <div className="p-3 border-b">
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -112,14 +169,15 @@ export default function LiveTracking() {
       </div>
 
       {/* Map */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
         <MapContainer
           center={center}
-          zoom={selectedId ? 14 : 5}
+          zoom={zoom}
           className="h-full w-full"
           scrollWheelZoom
-          key={`${center[0]}-${center[1]}-${selectedId}`}
+          zoomControl={true}
         >
+          <MapController center={center} zoom={zoom} selectedId={selectedId} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -127,33 +185,64 @@ export default function LiveTracking() {
           {locations.map((loc) => {
             const color = getColor(loc);
             const fuel = fuelUpdates[loc.vehicleId];
-            const isSelected = selectedId === loc.vehicleId;
+            const statusLabel = getStatusLabel(loc);
             return (
-              <CircleMarker
+              <Marker
                 key={loc.vehicleId}
-                center={[loc.latitude, loc.longitude]}
-                radius={isSelected ? 10 : 7}
-                pathOptions={{
-                  color,
-                  fillColor: color,
-                  fillOpacity: 0.85,
-                  weight: isSelected ? 3 : 1,
-                }}
+                position={[loc.latitude, loc.longitude]}
+                icon={createCarIcon(color)}
               >
                 <Popup>
-                  <div className="text-sm space-y-1">
-                    <p className="font-bold">{loc.vehicleNumber}</p>
+                  <div className="text-sm space-y-1 min-w-[180px]">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold">{loc.vehicleNumber}</p>
+                      <Badge 
+                        variant="secondary" 
+                        className="text-xs"
+                        style={{ backgroundColor: color, color: 'white', borderColor: color }}
+                      >
+                        {statusLabel}
+                      </Badge>
+                    </div>
                     <p>Speed: {loc.speed} km/h</p>
+                    <p>Satellites: {loc.satellites}</p>
                     {fuel && <p>Fuel: {fuel.fuelLevel.toFixed(1)}%</p>}
                     <p className="text-xs text-gray-500">
-                      Last: {new Date(loc.receivedAt).toLocaleString()}
+                      IMEI: {loc.imei}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Position: {loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Time: {new Date(loc.timestamp).toLocaleString()}
                     </p>
                   </div>
                 </Popup>
-              </CircleMarker>
+              </Marker>
             );
           })}
         </MapContainer>
+
+        {/* Legend */}
+        <Card className="absolute bottom-6 left-6 z-[1000] shadow-lg">
+          <CardContent className="p-3">
+            <h3 className="text-sm font-semibold mb-2">Vehicle Status</h3>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-[#10b981]"></div>
+                <span className="text-xs">Moving</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-[#f59e0b]"></div>
+                <span className="text-xs">Stopped</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-[#ef4444]"></div>
+                <span className="text-xs">Offline</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

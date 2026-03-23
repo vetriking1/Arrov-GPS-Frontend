@@ -47,9 +47,9 @@ export default function Analytics() {
 
   const hourlyData = hourlyStats.map((h) => ({
     hour: new Date(h.hour).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    avgSpeed: h.avg_speed,
-    maxSpeed: h.max_speed,
-    satellites: h.avg_satellites,
+    avgSpeed: Number(h.avg_speed) || 0,
+    maxSpeed: Number(h.max_speed) || 0,
+    satellites: Number(h.avg_satellites) || 0,
   }));
 
   return (
@@ -95,8 +95,10 @@ export default function Analytics() {
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">{a.vehicle_number}</TableCell>
                       <TableCell>{a.data_points}</TableCell>
-                      <TableCell>{a.avg_speed.toFixed(1)} km/h</TableCell>
-                      <TableCell>{a.max_speed} km/h</TableCell>
+                      <TableCell>
+                        {a.avg_speed != null ? Number(a.avg_speed).toFixed(1) : '—'} km/h
+                      </TableCell>
+                      <TableCell>{a.max_speed != null ? Number(a.max_speed) : '—'} km/h</TableCell>
                       <TableCell className="text-xs">{new Date(a.first_seen).toLocaleString()}</TableCell>
                       <TableCell className="text-xs">{new Date(a.last_seen).toLocaleString()}</TableCell>
                     </TableRow>
@@ -194,9 +196,15 @@ export default function Analytics() {
                     <TableRow key={i}>
                       <TableCell className="font-medium">{v.vehicle_number}</TableCell>
                       <TableCell>
-                        <Badge variant="destructive">{v.speed} km/h</Badge>
+                        <Badge variant="destructive">
+                          {v.speed != null ? Number(v.speed) : '—'} km/h
+                        </Badge>
                       </TableCell>
-                      <TableCell className="text-xs">{v.latitude.toFixed(4)}, {v.longitude.toFixed(4)}</TableCell>
+                      <TableCell className="text-xs">
+                        {v.latitude != null && v.longitude != null 
+                          ? `${Number(v.latitude).toFixed(4)}, ${Number(v.longitude).toFixed(4)}`
+                          : '—'}
+                      </TableCell>
                       <TableCell className="text-xs">{new Date(v.timestamp).toLocaleString()}</TableCell>
                     </TableRow>
                   ))}
