@@ -36,16 +36,21 @@ export default function FuelMonitoring() {
   // Merge REST + WS data
   // Note: REST API returns fuel_level in liters, WebSocket returns fuelLevel as percentage
   const mergedFuel = useMemo(() => {
-    const map = new Map<number, FuelLive & { _fuelPct?: number }>();
+    const map = new Map<number, FuelLive & { _fuelPct?: number; _fuelLiters?: number }>();
     fuelLive.forEach((f) =>
-      map.set(f.vehicle_id, { ...f, _fuelPct: undefined })
+      map.set(f.vehicle_id, { ...f, _fuelPct: undefined, _fuelLiters: undefined })
     );
     Object.values(fuelUpdates).forEach((wu) => {
       const existing = map.get(wu.vehicleId);
       if (existing) {
-        // WebSocket fuelLevel is already a percentage, store it separately
+        // WebSocket fuelLevel is already a percentage
         existing._fuelPct = wu.fuelLevel;
         existing.voltage = wu.voltage;
+        // Calculate liters from WebSocket percentage
+        const tankCapacity = Number(existing.fuel_tank_capacity) || 0;
+        if (tankCapacity > 0) {
+          existing._fuelLiters = (wu.fuelLevel / 100) * tankCapacity;
+        }
       }
     });
     return Array.from(map.values());
@@ -82,15 +87,22 @@ export default function FuelMonitoring() {
       {/* Live fuel gauges */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {mergedFuel.map((f) => {
-          const fuelLevel = Number(f.fuel_level) || 0;
           const tankCapacity = Number(f.fuel_tank_capacity) || 0;
-          // Use WebSocket percentage if available, otherwise calculate from REST data
-          const pct =
-            f._fuelPct !== undefined
-              ? f._fuelPct
-              : tankCapacity > 0
-              ? (fuelLevel / tankCapacity) * 100
-              : fuelLevel;
+          
+          // Prioritize WebSocket data (real-time and more accurate)
+          let fuelLiters: number;
+          let fuelPct: number;
+          
+          if (f._fuelPct !== undefined && f._fuelLiters !== undefined) {
+            // Use WebSocket data (real-time)
+            fuelPct = f._fuelPct;
+            fuelLiters = f._fuelLiters;
+          } else {
+            // Fallback to REST API data
+            fuelLiters = Number(f.fuel_level) || 0;
+            fuelPct = tankCapacity > 0 ? (fuelLiters / tankCapacity) * 100 : 0;
+          }
+          
           return (
             <Card key={f.vehicle_id}>
               <CardContent className="p-4">
@@ -102,12 +114,12 @@ export default function FuelMonitoring() {
                     </span>
                   </div>
                   <span className="text-lg font-bold">
-                    {fuelLevel.toFixed(1)}L
+                    {fuelLiters.toFixed(1)}L
                   </span>
                 </div>
-                <Progress value={Math.min(pct, 100)} className="h-2" />
+                <Progress value={Math.min(fuelPct, 100)} className="h-2" />
                 <p className="text-xs text-muted-foreground mt-1">
-                  {pct.toFixed(0)}% • {tankCapacity}L capacity
+                  {fuelPct.toFixed(0)}% • {tankCapacity}L capacity
                 </p>
               </CardContent>
             </Card>
