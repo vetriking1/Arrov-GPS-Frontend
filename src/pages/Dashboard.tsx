@@ -60,7 +60,6 @@ export default function Dashboard() {
 
   const { vehicleLocations, geofenceAlerts, vehicleStatuses } = useWSData();
   const locations = Object.values(vehicleLocations);
-
   const stats = [
     {
       label: "Total Vehicles",

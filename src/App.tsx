@@ -14,6 +14,8 @@ import Analytics from "./pages/Analytics";
 import RouteHistory from "./pages/RouteHistory";
 import NotFound from "./pages/NotFound";
 
+// main app
+
 const queryClient = new QueryClient();
 
 const App = () => (
