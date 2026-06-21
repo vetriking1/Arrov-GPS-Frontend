@@ -13,11 +13,97 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { MapContainer, TileLayer, Circle, Polygon, useMap } from "react-leaflet";
-import { Plus, Trash2, Edit2, MapPin } from "lucide-react";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { MapContainer, TileLayer, Circle, Polygon, Marker, useMap, useMapEvents } from "react-leaflet";
+import { Plus, Trash2, MapPin, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect } from "react";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { haversineMeters } from "@/lib/routeAnalysis";
+import { detectVisits } from "@/lib/geofenceAnalysis";
+import { istTodayString, istDayRange, addDays, formatIST, formatISTTime } from "@/lib/datetime";
+
+// --- Draggable circle editor (item 10) ---
+const centerHandleIcon = L.divIcon({
+  html: `<div style="width:18px;height:18px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 1px 6px rgba(0,0,0,.4)"></div>`,
+  className: "gf-center-handle",
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+const radiusHandleIcon = L.divIcon({
+  html: `<div style="width:14px;height:14px;background:white;border:3px solid #2563eb;border-radius:50%;box-shadow:0 1px 6px rgba(0,0,0,.4);cursor:ew-resize"></div>`,
+  className: "gf-radius-handle",
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+});
+
+// Leaflet renders 0-size when mounted inside an animating dialog; force a resize after mount.
+function InvalidateOnMount() {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 150);
+    return () => clearTimeout(t);
+  }, [map]);
+  return null;
+}
+
+function ClickToSetCenter({ onSet }: { onSet: (c: [number, number]) => void }) {
+  useMapEvents({
+    click(e) {
+      onSet([e.latlng.lat, e.latlng.lng]);
+    },
+  });
+  return null;
+}
+
+function CircleEditor({
+  center,
+  radius,
+  onChange,
+}: {
+  center: [number, number] | null;
+  radius: number;
+  onChange: (center: [number, number], radius: number) => void;
+}) {
+  if (!center) {
+    return <ClickToSetCenter onSet={(c) => onChange(c, radius)} />;
+  }
+  const [lat, lng] = center;
+  const metersPerDegLng = 111320 * Math.cos((lat * Math.PI) / 180) || 111320;
+  const edge: [number, number] = [lat, lng + radius / metersPerDegLng];
+  return (
+    <>
+      <ClickToSetCenter onSet={(c) => onChange(c, radius)} />
+      <Circle center={center} radius={radius} pathOptions={{ color: "#2563eb", fillOpacity: 0.2 }} />
+      <Marker
+        position={center}
+        icon={centerHandleIcon}
+        draggable
+        eventHandlers={{
+          drag: (e) => {
+            const m = (e.target as L.Marker).getLatLng();
+            onChange([m.lat, m.lng], radius);
+          },
+        }}
+      />
+      <Marker
+        position={edge}
+        icon={radiusHandleIcon}
+        draggable
+        eventHandlers={{
+          drag: (e) => {
+            const m = (e.target as L.Marker).getLatLng();
+            const r = Math.max(10, Math.round(haversineMeters(lat, lng, m.lat, m.lng)));
+            onChange(center, r);
+          },
+        }}
+      />
+    </>
+  );
+}
 
 function MapController({ selectedGeofence }: { selectedGeofence: Geofence | null }) {
   const map = useMap();
@@ -68,7 +154,7 @@ export default function Geofences() {
     fence_type: "circle" as "circle" | "polygon",
     center_lat: "",
     center_lon: "",
-    radius_meters: "500",
+    radius_meters: "50",
   });
 
   const selectedGeofence = useMemo(
@@ -94,6 +180,12 @@ export default function Geofences() {
 
   const mapZoom = geofences.length > 0 ? 10 : 5;
 
+  // Initial center for the create-dialog editor map.
+  const editorCenter: [number, number] =
+    createForm.center_lat && createForm.center_lon
+      ? [Number(createForm.center_lat), Number(createForm.center_lon)]
+      : mapCenter;
+
   const createMutation = useMutation({
     mutationFn: () =>
       api.createGeofence({
@@ -108,7 +200,7 @@ export default function Geofences() {
       queryClient.invalidateQueries({ queryKey: ["geofences"] });
       toast.success("Geofence created");
       setShowCreate(false);
-      setCreateForm({ name: "", description: "", fence_type: "circle", center_lat: "", center_lon: "", radius_meters: "500" });
+      setCreateForm({ name: "", description: "", fence_type: "circle", center_lat: "", center_lon: "", radius_meters: "50" });
     },
     onError: () => toast.error("Failed to create geofence"),
   });
@@ -134,6 +226,31 @@ export default function Geofences() {
     queryFn: () => api.getGeofenceEvents(eventsId!, { limit: 50 }),
     enabled: !!eventsId,
   });
+
+  // Per-day geofence activity, computed on the frontend (item 9).
+  const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: api.getVehicles });
+  const [activityVehicle, setActivityVehicle] = useState<string>("");
+  const [activityDate, setActivityDate] = useState<string>(istTodayString());
+  const activityRange = useMemo(() => istDayRange(activityDate), [activityDate]);
+  const { data: activityRoute = [] } = useQuery({
+    queryKey: ["geofence-activity", activityVehicle, activityRange.fromUTC],
+    // ±1h margin so a visit straddling midnight is captured. getVehicleRoute orders ascending.
+    queryFn: () =>
+      api.getVehicleRoute(
+        Number(activityVehicle),
+        new Date(new Date(activityRange.fromUTC).getTime() - 3600_000).toISOString(),
+        new Date(new Date(activityRange.toUTC).getTime() + 3600_000).toISOString()
+      ),
+    enabled: !!activityVehicle && !!activityDate,
+  });
+  const activeGeofences = useMemo(() => geofences.filter((g) => g.is_active), [geofences]);
+  const dayVisits = useMemo(
+    () =>
+      detectVisits(activityRoute as any[], activeGeofences).filter(
+        (v) => istDayRange(activityDate).fromUTC <= v.enterTime && v.enterTime < istDayRange(activityDate).toUTC
+      ),
+    [activityRoute, activeGeofences, activityDate]
+  );
 
   return (
     <div className="p-6 space-y-6">
@@ -299,7 +416,7 @@ export default function Geofences() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">{e.latitude.toFixed(4)}, {e.longitude.toFixed(4)}</TableCell>
-                    <TableCell className="text-xs">{new Date(e.timestamp).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs">{formatIST(e.timestamp)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -307,6 +424,92 @@ export default function Geofences() {
           </CardContent>
         </Card>
       )}
+
+      {/* Per-day geofence activity (computed on the frontend) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="h-4 w-4" /> Per-Day Geofence Activity
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-48">
+              <Label>Vehicle</Label>
+              <Select value={activityVehicle} onValueChange={setActivityVehicle}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select vehicle" />
+                </SelectTrigger>
+                <SelectContent>
+                  {vehicles.map((v) => (
+                    <SelectItem key={v.id} value={String(v.id)}>
+                      {v.vehicle_number}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant={activityDate === istTodayString() ? "default" : "outline"}
+                onClick={() => setActivityDate(istTodayString())}
+              >
+                Today
+              </Button>
+              <Button
+                variant={activityDate === addDays(istTodayString(), -1) ? "default" : "outline"}
+                onClick={() => setActivityDate(addDays(istTodayString(), -1))}
+              >
+                Yesterday
+              </Button>
+            </div>
+            <div>
+              <Label htmlFor="actDate">Date</Label>
+              <Input
+                id="actDate"
+                type="date"
+                max={istTodayString()}
+                value={activityDate}
+                onChange={(e) => setActivityDate(e.target.value)}
+                className="w-44"
+              />
+            </div>
+          </div>
+
+          {activityVehicle && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Geofence</TableHead>
+                  <TableHead>Entry</TableHead>
+                  <TableHead>Exit</TableHead>
+                  <TableHead className="text-right">Dwell</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dayVisits.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center py-6 text-muted-foreground">
+                      {activeGeofences.length === 0
+                        ? "No active geofences defined"
+                        : "No geofence visits for this day"}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  dayVisits.map((v, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="font-medium">{v.geofenceName}</TableCell>
+                      <TableCell className="text-xs">{formatISTTime(v.enterTime)}</TableCell>
+                      <TableCell className="text-xs">{formatISTTime(v.exitTime)}</TableCell>
+                      <TableCell className="text-right text-xs font-semibold">{v.durationMin} min</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Create dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
@@ -333,39 +536,58 @@ export default function Geofences() {
                 onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })} 
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="lat">Center Latitude</Label>
-                <Input 
-                  id="lat"
-                  type="number" 
-                  step="any"
-                  placeholder="e.g. 20.5937"
-                  value={createForm.center_lat} 
-                  onChange={(e) => setCreateForm({ ...createForm, center_lat: e.target.value })} 
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lon">Center Longitude</Label>
-                <Input 
-                  id="lon"
-                  type="number" 
-                  step="any"
-                  placeholder="e.g. 78.9629"
-                  value={createForm.center_lon} 
-                  onChange={(e) => setCreateForm({ ...createForm, center_lon: e.target.value })} 
-                />
-              </div>
-            </div>
             <div className="space-y-2">
-              <Label htmlFor="radius">Radius (meters)</Label>
-              <Input 
-                id="radius"
-                type="number"
-                placeholder="500"
-                value={createForm.radius_meters} 
-                onChange={(e) => setCreateForm({ ...createForm, radius_meters: e.target.value })} 
-              />
+              <Label>Location & Radius</Label>
+              <p className="text-xs text-muted-foreground">
+                Tap the map to place the circle, drag the blue center to move it, and drag the small
+                edge handle to resize.
+              </p>
+              <div className="h-64 rounded-lg overflow-hidden border relative z-0">
+                <MapContainer
+                  center={editorCenter}
+                  zoom={createForm.center_lat ? 15 : 11}
+                  className="h-full w-full"
+                >
+                  <InvalidateOnMount />
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <CircleEditor
+                    center={
+                      createForm.center_lat && createForm.center_lon
+                        ? [Number(createForm.center_lat), Number(createForm.center_lon)]
+                        : null
+                    }
+                    radius={Number(createForm.radius_meters) || 50}
+                    onChange={(c, r) =>
+                      setCreateForm((f) => ({
+                        ...f,
+                        center_lat: String(c[0]),
+                        center_lon: String(c[1]),
+                        radius_meters: String(r),
+                      }))
+                    }
+                  />
+                </MapContainer>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs text-muted-foreground">
+                  {createForm.center_lat
+                    ? `${Number(createForm.center_lat).toFixed(5)}, ${Number(createForm.center_lon).toFixed(5)}`
+                    : "No center set"}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="radius" className="text-xs whitespace-nowrap">Radius (m)</Label>
+                  <Input
+                    id="radius"
+                    type="number"
+                    className="w-24"
+                    value={createForm.radius_meters}
+                    onChange={(e) => setCreateForm({ ...createForm, radius_meters: e.target.value })}
+                  />
+                </div>
+              </div>
             </div>
           </div>
           <DialogFooter>

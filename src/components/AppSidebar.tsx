@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Route,
+  Wallet,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -32,6 +33,7 @@ const navItems = [
   { title: "Fuel Monitoring", url: "/fuel", icon: Fuel },
   { title: "Geofences", url: "/geofences", icon: Hexagon },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Expenses", url: "/expenses", icon: Wallet },
 ];
 
 export function AppSidebar() {

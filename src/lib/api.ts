@@ -23,11 +23,35 @@ export interface Vehicle {
   driver_name: string;
   driver_phone: string;
   fuel_tank_capacity: number;
+  wheels_count: number | null;
+  emi_per_month: number | string | null;
+  emi_end_date: string | null;
+  insurance_due_date: string | null;
+  insurance_amount: number | string | null;
+  road_tax_due_date: string | null;
+  road_tax_amount: number | string | null;
   is_active: boolean;
   last_lat: number;
   last_lon: number;
   last_speed: number;
   last_seen: string;
+}
+
+export interface VehiclePayload {
+  imei: string;
+  vehicle_number: string;
+  vehicle_type?: string | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  fuel_tank_capacity?: number | null;
+  wheels_count?: number | null;
+  emi_per_month?: number | null;
+  emi_end_date?: string | null;
+  insurance_due_date?: string | null;
+  insurance_amount?: number | null;
+  road_tax_due_date?: string | null;
+  road_tax_amount?: number | null;
+  is_active?: boolean;
 }
 
 export interface LiveLocation {
@@ -147,12 +171,53 @@ export interface SpeedViolation {
   received_at: string;
 }
 
+// Expenses
+export interface ExpenseType {
+  id: number;
+  name: string;
+  is_active: boolean;
+}
+
+export type ExpenseCategory = "vehicle" | "others";
+export type PaymentMode = "Cash" | "UPI" | "Bank Transfer";
+
+export interface Expense {
+  id: number;
+  expense_category: ExpenseCategory;
+  vehicle_id: number | null;
+  vehicle_number: string | null;
+  name: string | null;
+  expense_type_id: number | null;
+  expense_type: string | null;
+  quantity: number | string | null;
+  amount: number | string;
+  payment_mode: PaymentMode | null;
+  expense_date: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface ExpensePayload {
+  expense_category: ExpenseCategory;
+  vehicle_id?: number | null;
+  vehicle_number?: string | null;
+  name?: string | null;
+  expense_type_id?: number | null;
+  quantity?: number | null;
+  amount: number;
+  payment_mode?: PaymentMode | null;
+  expense_date?: string | null;
+  notes?: string | null;
+}
+
 // API functions
 export const api = {
   // Vehicles
   getVehicles: () => apiFetch<Vehicle[]>("/vehicles"),
   getVehicle: (id: number) => apiFetch<Vehicle>(`/vehicles/${id}`),
-  updateVehicle: (id: number, data: Partial<Vehicle>) =>
+  createVehicle: (data: VehiclePayload) =>
+    apiFetch<Vehicle>("/vehicles", { method: "POST", body: JSON.stringify(data) }),
+  updateVehicle: (id: number, data: Partial<VehiclePayload>) =>
     apiFetch<Vehicle>(`/vehicles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   updateVehicleImei: (id: number, imei: string) =>
     apiFetch<Vehicle>(`/vehicles/${id}/imei`, { method: "PUT", body: JSON.stringify({ imei }) }),
@@ -228,4 +293,21 @@ export const api = {
     if (params?.to) sp.set("to", params.to);
     return apiFetch<SpeedViolation[]>(`/analytics/speed-violations?${sp}`);
   },
+
+  // Expenses
+  getExpenseTypes: () => apiFetch<ExpenseType[]>("/expenses/types?active_only=true"),
+  createExpenseType: (name: string) =>
+    apiFetch<ExpenseType>("/expenses/types", { method: "POST", body: JSON.stringify({ name }) }),
+  getExpenses: (params?: { from?: string; to?: string; vehicle_id?: number; type_id?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.from) sp.set("from", params.from);
+    if (params?.to) sp.set("to", params.to);
+    if (params?.vehicle_id) sp.set("vehicle_id", String(params.vehicle_id));
+    if (params?.type_id) sp.set("type_id", String(params.type_id));
+    return apiFetch<Expense[]>(`/expenses?${sp}`);
+  },
+  createExpense: (data: ExpensePayload) =>
+    apiFetch<{ id: number }>("/expenses", { method: "POST", body: JSON.stringify(data) }),
+  deleteExpense: (id: number) =>
+    apiFetch<void>(`/expenses/${id}`, { method: "DELETE" }),
 };

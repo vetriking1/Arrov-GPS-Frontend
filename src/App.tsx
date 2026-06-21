@@ -12,6 +12,7 @@ import FuelMonitoring from "./pages/FuelMonitoring";
 import Geofences from "./pages/Geofences";
 import Analytics from "./pages/Analytics";
 import RouteHistory from "./pages/RouteHistory";
+import Expenses from "./pages/Expenses";
 import NotFound from "./pages/NotFound";
 
 // main app
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/geofences" element={<Geofences />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/route-history" element={<RouteHistory />} />
+            <Route path="/expenses" element={<Expenses />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
